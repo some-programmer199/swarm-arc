@@ -1,0 +1,4 @@
+todo list:
+1. test params and assess shapes.
+2. decide decoder architecture
+3. make final nn.module
