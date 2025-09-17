@@ -163,7 +163,51 @@ def demo_run():
         "delta": delta,
         "info": info
     }
+class Agent:
+    def __init__(self, vector_dim, genome_dim, mutator,coordinate:tuple):
+       self.coordinate=coordinate
+       self.vector = torch.randn(vector_dim)
+       self.genome = torch.randn(genome_dim, requires_grad=True)
+       self.decoder = GenomeDecoder(genome_dim, hidden=256, out_dim=256)
+       self.mutator = HybridMutator(vector_dim, vector_dim)
 
+
+    def step(self, neighbors):
+        # decode genome into mutator weights
+        weights = fill_params(self.mutator, self.genome, self.decoder)
+        # average neighbor vectors
+        neighbor_batch = torch.stack(neighbors)
+        new_vector = self.mutator(neighbor_batch, weights)
+        self.vector = new_vector.detach()
+        return self.vector
+    
+def swarm_step(agents, k=3):
+    # Stack coordinates and vectors
+    coords = torch.stack([torch.tensor(a.coordinate, dtype=torch.float32) for a in agents])  # (N, D)
+    vectors = torch.stack([a.vector for a in agents])  # (N, vector_dim)
+    N = len(agents)
+
+    # Compute pairwise distances (N, N)
+    diff = coords.unsqueeze(1) - coords.unsqueeze(0)  # (N, N, D)
+    dists = torch.norm(diff, dim=2)  # (N, N)
+    dists.fill_diagonal_(float('inf'))  # Exclude self
+
+    # Find k nearest neighbors for each agent
+    knn_idx = torch.topk(dists, k, largest=False).indices  # (N, k)
+
+    updated = []
+    for i, agent in enumerate(agents):
+        neighbor_vectors = vectors[knn_idx[i]]  # (k, vector_dim)
+        updated_vector = agent.step([v for v in neighbor_vectors])
+        updated.append(updated_vector)
+    return updated
+
+
+def fitness(agents):
+    scores = torch.tensor([torch.norm(a.vector) for a in agents])
+    # clip scores so bad agents don't drag reward down too much
+    clipped = torch.clamp(scores, min=0.1 * scores.mean())
+    return clipped.sum(), scores
 
 if __name__ == "__main__":
     _out = demo_run()
