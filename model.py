@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-torch.manual_seed(0)
+
 
 
 
@@ -110,8 +110,14 @@ class HybridMutator(nn.Module):
             "delta_norm": delta.norm(dim=-1).mean().item(),
             "attn_weights": attn_weights
         }
-
-
+# ---------------- Full Run ----------------
+def full_run(num_genomes=10, batch=16, genome_dim=128,device="cpu"):
+    genomes=torch.randn(num_genomes, genome_dim) * 0.1
+    mutators = [HybridMutator(token_dim=32, gru_hidden=256, attn_dim=64, num_context_tokens=8).to(device=device) for _ in range(num_genomes)]
+    decoder = GenomeDecoder(genome_dim=genome_dim, hidden=256, out_dim=256).to(device=device)
+    for i in range(num_genomes):
+        fill_params(mutators[i], genomes[i], decoder)
+    
 # ---------------- Demo ----------------
 def demo_run():
     device = torch.device("cpu")
