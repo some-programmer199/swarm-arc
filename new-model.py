@@ -118,3 +118,4 @@ def train_swarm(agents, steps=4, k=3, lr=1e-3, epochs=100):
 if __name__ == "__main__":
     agents = [Agent(vector_dim=32, genome_dim=128, mutator_param_dim=512) for _ in range(5)]
     train_swarm(agents, steps=3, k=2, lr=1e-3, epochs=50)
+    

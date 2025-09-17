@@ -111,13 +111,21 @@ class HybridMutator(nn.Module):
             "attn_weights": attn_weights
         }
 # ---------------- Full Run ----------------
-def full_run(num_genomes=10, batch=16, genome_dim=128,device="cpu"):
-    genomes=torch.randn(num_genomes, genome_dim) * 0.1
-    mutators = [HybridMutator(token_dim=32, gru_hidden=256, attn_dim=64, num_context_tokens=8).to(device=device) for _ in range(num_genomes)]
-    decoder = GenomeDecoder(genome_dim=genome_dim, hidden=256, out_dim=256).to(device=device)
-    for i in range(num_genomes):
-        fill_params(mutators[i], genomes[i], decoder)
-    
+def full_run(num_genomes=256, batch=16, genome_dim=128,device="cpu"):
+    agents=[Agent(vector_dim=32,
+                  genome_dim=genome_dim, 
+                  mutator=HybridMutator(token_dim=32, gru_hidden=256, attn_dim=64, num_context_tokens=8),coordinate=(i,0),
+                  coordinate=(i//16,i%16))
+                    for i in range(num_genomes)]
+    optimizer=torch.optim.Adam([a.genome for a in agents], lr=1e-3)
+    for step in range(100):
+        optimizer.zero_grad()
+        swarm_step(agents, k=3)
+        total_fitness, scores = fitness(agents)
+        (-total_fitness).backward()
+        optimizer.step()
+        if step % 10 == 0:
+            print(f"Step {step}, total fitness: {total_fitness.item()}, avg score: {scores.mean().item()}")
 # ---------------- Demo ----------------
 def demo_run():
     device = torch.device("cpu")
@@ -210,4 +218,4 @@ def fitness(agents):
     return clipped.sum(), scores
 
 if __name__ == "__main__":
-    _out = demo_run()
+    _out = full_run(num_genomes=16, batch=4, genome_dim=128,device="cpu")
