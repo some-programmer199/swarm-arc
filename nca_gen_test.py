@@ -41,27 +41,45 @@ class CoordNCA(nn.Module):
         B = grid.shape[0]
         new_grid = grid.clone()
         offsets_clamped = torch.clamp(self.offsets, -OFFSET_MAX, OFFSET_MAX)
-        for i in range(H):
-            for j in range(W):
-                dx, dy = offsets_clamped[i,j]
-                x = torch.clamp(j + dx, 0, W-1-1e-3)
-                y = torch.clamp(i + dy, 0, H-1-1e-3)
-                # normalize to [-1,1] for grid_sample
-                gx = (x/(W-1))*2 - 1
-                gy = (y/(H-1))*2 - 1
-                sample_coords = torch.tensor([[[[gx, gy]]]], device=DEVICE).repeat(B,1,1,1)
-                sampled = F.grid_sample(grid, sample_coords, mode='bilinear', align_corners=True)
-                sampled = sampled.view(B, C)
-                cell_state = grid[:,:,i,j].view(B,C)
-                mlp_input = torch.cat([cell_state, sampled], dim=1)
-                delta = DELTA_SCALE * torch.tanh(self.mlp(mlp_input))  # limit step size
-                new_grid[:,:,i,j] = cell_state + delta
+
+        # Create meshgrid of coordinates
+        ys, xs = torch.meshgrid(
+            torch.arange(H, device=DEVICE),
+            torch.arange(W, device=DEVICE),
+            indexing='ij'
+        )
+        xs = xs.float()
+        ys = ys.float()
+        dx = offsets_clamped[..., 0]
+        dy = offsets_clamped[..., 1]
+        x = torch.clamp(xs + dx, 0, W-1-1e-3)
+        y = torch.clamp(ys + dy, 0, H-1-1e-3)
+        gx = (x/(W-1))*2 - 1
+        gy = (y/(H-1))*2 - 1
+
+        # Stack and reshape for grid_sample
+        sample_coords = torch.stack([gx, gy], dim=-1)  # [H, W, 2]
+        sample_coords = sample_coords.unsqueeze(0).repeat(B,1,1,1)  # [B, H, W, 2]
+
+        # grid_sample expects [B, C, H, W], grid [B, C, H, W], coords [B, H, W, 2]
+        sampled = F.grid_sample(
+            grid, sample_coords, mode='bilinear', align_corners=True
+        )  # [B, C, H, W]
+
+        cell_state = grid  # [B, C, H, W]
+        mlp_input = torch.cat([
+            cell_state, sampled
+        ], dim=1)  # [B, 2C, H, W]
+        mlp_input = mlp_input.permute(0,2,3,1).reshape(-1, 2*self.channels)  # [B*H*W, 2C]
+        delta = DELTA_SCALE * torch.tanh(self.mlp(mlp_input))  # [B*H*W, C]
+        delta = delta.view(B, H, W, C).permute(0,3,1,2)  # [B, C, H, W]
+        new_grid = cell_state + delta
         return new_grid
 
 # ---------- Feedback ----------
 TARGET_GRID = torch.randn(C,H,W,device=DEVICE)*2.0
 def feedback_fn(grid):
-    return -torch.norm(grid - TARGET_GRID.unsqueeze(0), dim=(1,2,3))
+    return F.normalize(grid - TARGET_GRID.unsqueeze(0), dim=(1,2,3))
 
 # ---------- Stateless update with gradient clipping ----------
 def stateless_update(model, loss, lr=LR, max_grad_norm=1.0):
@@ -92,7 +110,7 @@ for gen in range(1, GENS+1):
 
         # evaluation
         with torch.no_grad():
-            z_eval = torch.randn(1, C, H, W, device=DEVICE)
+            z_eval = torch.randn(8, C, H, W, device=DEVICE)  # batch eval for speed
             out_eval = z_eval
             for _ in range(STEPS):
                 out_eval = model(out_eval)
@@ -141,4 +159,5 @@ with torch.no_grad():
     best_idx = max(range(len(final_scores)), key=lambda i: final_scores[i])
     print("=== Done ===")
     print("Best reward:", final_scores[best_idx])
+
 

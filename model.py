@@ -105,65 +105,10 @@ class Evaluator(nn.Module):
         x = F.relu(self.fc(x))  # [batch_size, input_tokens, 1]
         x = x.mean(dim=1)       # [batch_size, 1]
         return x
-class LinearWithMemory(nn.Module):
-    def __init__(self,input_dim, output_dim):
-        super().__init__()
-        self.weights = nn.Parameter(torch.randn(input_dim, output_dim))
-        self.bias = nn.Parameter(torch.zeros(output_dim))
-        self.fastweights = nn.Parameter(torch.zeros(input_dim, output_dim), requires_grad=False)
-    def forward(self, x):
-        return x @ (self.weights + self.fastweights) + self.bias
+
 class Generator(nn.Module):
-    def __init__(self, input_dim, input_tokens, context_size=256, hidden_dim=128, num_blocks=2, num_heads=4):
-        super().__init__()
-        self.input_dim = input_dim
-        self.input_tokens = input_tokens
-        self.context_size = context_size
-        self.input_proj = nn.Linear(input_dim + context_size, hidden_dim)
-        self.contextcondenser = nn.Linear(input_dim * input_tokens, context_size)
-        self.context = torch.zeros(1, context_size)  # [1, context_size]
-        self.blocks = nn.ModuleList([
-            nn.ModuleDict({
-                'ln1': nn.LayerNorm(hidden_dim),
-                'attn': nn.MultiheadAttention(hidden_dim, num_heads, batch_first=True),
-                'ln2': nn.LayerNorm(hidden_dim),
-                'ff': nn.Sequential(
-                    nn.Linear(hidden_dim, hidden_dim),
-                    nn.ReLU(),
-                    nn.Linear(hidden_dim, hidden_dim)
-                )
-            })
-            for _ in range(num_blocks)
-        ])
-        self.output_proj = nn.Linear(hidden_dim, input_dim)
-
-    def forward(self, x):
-        # x: [batch_size, input_tokens, input_dim]
-        batch_size, input_tokens, input_dim = x.shape
-        # Expand context to match tokens
-        context = self.context.expand(batch_size, self.context_size)  # [batch_size, context_size]
-        context = context.unsqueeze(1).expand(-1, input_tokens, -1)   # [batch_size, input_tokens, context_size]
-        x = torch.cat((x, context), dim=-1)  # [batch_size, input_tokens, input_dim + context_size]
-        x = self.input_proj(x)
-        for block in self.blocks:
-            x_res = x
-            x = block['ln1'](x)
-            x, _ = block['attn'](x, x, x)
-            x = x + x_res
-
-            x_res = x
-            x = block['ln2'](x)
-            x = block['ff'](x)
-            x = x + x_res
-        x = self.output_proj(x)  # [batch_size, input_tokens, input_dim]
-        return x
-
-    def update_context(self, x):
-        # x: [batch_size, input_tokens, input_dim]
-        batch_size = x.size(0)
-        context = self.contextcondenser(x.reshape(batch_size, -1)).mean(dim=0, keepdim=True)
-        self.context = context  # [1, context_size]
-        return context
+    #based on 
+    def __init__()
 
 # Example usage in __main__:
 if __name__ == "__main__":
