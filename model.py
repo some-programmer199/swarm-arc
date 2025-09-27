@@ -107,9 +107,63 @@ class Evaluator(nn.Module):
         return x
 
 class Generator(nn.Module):
-    #based on 
-    def __init__()
+    def __init__(self, input_dim, input_tokens, context_dim=32, num_layers=2):
+        super().__init__()
+        self.input_dim = input_dim
+        self.input_tokens = input_tokens
+        self.context_dim = context_dim
+        self.attn = nn.MultiheadAttention(embed_dim=input_dim + context_dim, num_heads=4, batch_first=True)
+        self.blocks = nn.Sequential(*[
+            nn.Sequential(
+                nn.MultiheadAttention(embed_dim=input_dim + context_dim, num_heads=4, batch_first=True),
+                nn.Linear(input_dim + context_dim, input_dim + context_dim),
+                nn.ReLU()
+            ) for _ in range(num_layers)
+        ])
+        self.fc = nn.Linear(input_dim + context_dim, input_dim)
+        self.out_proj = nn.Linear(input_dim, 1)
 
+        self.context = None  # Will be initialized per batch
+        self.context_updatorattn = nn.MultiheadAttention(embed_dim=context_dim + input_dim + 1, num_heads=1, batch_first=True)
+        self.context_updatorfc = nn.Linear(context_dim + input_dim + 1, context_dim)
+
+    def forward(self, x):
+        # x: [batch_size, input_tokens, input_dim]
+        batch_size = x.size(0)
+        device = x.device
+        if self.context is None or self.context.size(0) != batch_size:
+            # Initialize context per batch
+            self.context = torch.zeros(batch_size, 1, self.context_dim, device=device)
+        context_expanded = self.context.expand(-1, self.input_tokens, -1)  # [batch_size, input_tokens, context_dim]
+        x = torch.cat([x, context_expanded], dim=-1)  # [batch_size, input_tokens, input_dim + context_dim]
+        x, _ = self.attn(x, x, x)
+        x = F.relu(self.fc(x))  # [batch_size, input_tokens, input_dim]
+        out = torch.sigmoid(self.out_proj(x)).squeeze(-1)  # [batch_size, input_tokens]
+
+        # Add small random noise
+        delta = (torch.rand_like(out) - 0.5) * 0.1
+        out = out + delta
+
+        return out
+
+    def update_context(self, feedbackv, reward):
+        # feedbackv: [batch_size, input_tokens, input_dim]
+        # reward: [batch_size, 1]
+        batch_size = feedbackv.size(0)
+        device = feedbackv.device
+        if self.context is None or self.context.size(0) != batch_size:
+            self.context = torch.zeros(batch_size, 1, self.context_dim, device=device)
+        # Expand reward to match tokens
+        reward_expanded = reward.unsqueeze(1).expand(-1, feedbackv.size(1), -1)  # [batch_size, input_tokens, 1]
+        # Expand context to match tokens
+        context_expanded = self.context.expand(-1, feedbackv.size(1), -1)  # [batch_size, input_tokens, context_dim]
+        # Concatenate along last dim
+        feedback = torch.cat([context_expanded, feedbackv, reward_expanded], dim=2)  # [batch_size, input_tokens, context_dim + input_dim + 1]
+        new_context, _ = self.context_updatorattn(feedback, feedback, feedback)
+        new_context = F.relu(self.context_updatorfc(new_context)).mean(dim=1, keepdim=True)  # [batch_size, 1, context_dim]
+        self.context = new_context.detach()
+class decoder
+def train_step(decoder,generator,evaluator)
 # Example usage in __main__:
 if __name__ == "__main__":
     # Toy ARC grid
@@ -136,9 +190,17 @@ if __name__ == "__main__":
     print(f"generator params: {sum(p.numel() for p in generator.parameters() if p.requires_grad)}")
     gen_out = generator(out)
     print("Generator output shape:", gen_out.shape)
-    # Simulate feedback and update context
-    feedback = torch.randn_like(gen_out)
-    generator.update_context(feedback)
+
+    # Simulate feedback: Evaluator evaluates generator's output
+    # For demonstration, let's use the encoder output as input to the evaluator
+    eval_score = evaluator(out)  # [batch_size, 1]
+    print("Evaluator score shape:", eval_score.shape)
+
+    # Feedback vector: for simplicity, use the encoder output (could be gradients, etc.)
+    feedbackv = out  # [batch_size, input_tokens, input_dim]
+    reward = eval_score  # [batch_size, 1]
+
+    generator.update_context(feedbackv, reward)
     print("Updated context shape:", generator.context.shape)
 
 
